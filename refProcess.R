@@ -26,6 +26,7 @@ partition <- function(inG, trnRat) {
 }
 
 #Takes in a graph and returns a subgraph containing only vertices up to a certain year and edges under a certain distance
+####- TO-DO: Split this functionality into optCut and forwardCensor -####
 cutAndCensor <- function(inG, y, dist) {
   #@param inG: The graph to be processed
   #@param year: The specified year, beyond which all vertices will be censored
@@ -36,17 +37,29 @@ cutAndCensor <- function(inG, y, dist) {
   outG <- induced_subgraph(inG, vertUpToYear , impl = "copy_and_delete")
   
   eWithinDist <- E(outG)[E(outG)$Distance<=dist]
-  outG <- subgraph.edges(outG, eWithinDist, delete.vertices = FALSE)
+  outG <- subgraph.edges(outG, eWithinDist, delete.vertices = F)
   
   return(outG)
 }
 
 #In Progress...
+optCut <- function(inG) {
+  #Nested Optimization? Multiobjective Optimization?
+}
+
+#In Progress...
+forwardCensor <- function(inG, y) {
+  
+}
+
+#Generates a difference representing how accurately a set of predictor variablespredict cluster size. 
+#This score is based off of the difference between clusters actual growth in a year vs their estimate of their own growth.
+#Currently the only predictor of growth is recent cluster growth.
 predict <- function(inG, y, dist) {
-  #@param inG:
-  #@param y:
-  #@param dist:
-  #@return:
+  #@param inG: The graph representing all of the data
+  #@param y: The reference point year (recent growth and clusters will be based off of this year)
+  #@param dist: The cutoff genetic distance. Only vertices below this distance may be in the same cluster
+  #@return: The Average difference between estimated and actual growth for clusters.
   
   #Sub Graphs representing the total input graph sensored up to the next year and present year (respectively)
   newG <- cutAndCensor(inG, (y+1), dist)
@@ -69,25 +82,26 @@ predict <- function(inG, y, dist) {
   
   #Creates a sub graph, representing only the interface between the current and the next year
   #Only edges between a current year and next year vertex are included
-  #!!!BROKEN: Possibly creating empty graphs.
-  bridgeEs <- E(newG)[(V(newG)[V(newG)$years==(year+1)]) %--% (V(newG)[V(newG)$years==year])]
+  bridgeEs <- E(newG)[(V(newG)[V(newG)$year==(y+1)]) %--% (V(newG)[V(newG)$year==y])]
   bridgeG <- subgraph.edges(newG, bridgeEs, delete.vertices = T) 
+  print(bridgeG)
   newVs <- V(bridgeG)[V(bridgeG)$year==(y+1)]
   
-  #!!!BROKEN: Recieving 0 input crashes
-  #!!!BROKEN: Does not award full score to a cluster that recieves the same vertex twice
-  for (i in 1:length(newVs)) {
-    print(i)
-    v <- newVs[[i]]
-    print(v)
-    es <- E(bridgeG)[inc(v)]
-    vWeight <- 1/length(es)
-    print(vWeight)
-    cluIndex <- unname(clu$membership[attr(clu$membership, "names") %in% ends(bridgeG, es, names = T)])
-    print(cluIndex)
-    temp <- sapply(clu$growth, function(x) x+vWeight) 
-    clu$growth <- temp
+  #Based on the bridge between the present and new year, sees the actual growth of clusters and compares the
+  if (length(newVs)!=0){
+    for (i in 1:length(newVs)) {
+      v <- newVs[[i]]
+      es <- E(bridgeG)[inc(v)]
+      vWeight <- 1/length(es)
+      cluIndex <- unname(clu$membership[attr(clu$membership, "names") %in% ends(bridgeG, es, names = T)])
+      temp <- sapply(clu$growth, function(x) x-vWeight) 
+      clu$growth <- temp
+    }
   }
+  
+  diff <- mean(sapply(clu$growth, function(x) abs(x)))
+  
+  return(diff)
 }
 
 #_______________________________________________________________________________________________________________#
@@ -106,9 +120,13 @@ V(g)$name <- temp[1,]
 V(g)$year <- as.numeric(temp[2,])
 years <- as.numeric(levels(factor(V(g)$year)))
 
-###-TO DO: Optimize distance cutoff input to obtain reasonable clusters-####
-
-#Test
-for(i in 5:5) {
-  predict(g, (2000+i), 0.05)
+#==TEST==#
+for(i in 0) {
+  predict(g, (2000+i), 0.1)
 }
+
+if(T) {
+  optCut(g)
+}
+
+
