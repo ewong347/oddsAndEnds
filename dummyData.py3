@@ -18,7 +18,7 @@ if (args.n==None): seqNum = 720
 else: seqNum = args.n
 if (args.l==None): seqLen = 600 
 else: seqLen = args.l
-if (args.m==None): mutRate = 0.1*seqLen
+if (args.m==None): mutRate = 0.01*seqLen
 else: mutRate = seqLen*args.m
 if (args.f==None): fileName = "dummyData.fas" 
 else: fileName = args.f	
