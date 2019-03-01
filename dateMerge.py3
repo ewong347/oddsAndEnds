@@ -16,7 +16,6 @@ for line in inFile:
 	if line.startswith(">"):
 		seqId = line.strip('>')
 		seqId = seqId.strip('\n')
-		seqId = seqId[:-2]
 		seqDate = dates[seqId]
 
 		s = (">" + seqId + "_" + seqDate)
