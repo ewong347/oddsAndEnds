@@ -320,7 +320,7 @@ growSim <- function(inG, alt=F, full=F) {
 }
 
 #Obtains a filtered subgraph of the full graph. Vertices are removed beyond a given year and edges are removed below a cutoff
-subGraph <- function(inG, y, d, plot=F) {
+subGraphP <- function(inG, y, d, plot=T) {
   #@param y: The year that represents the latest year. We forward-censor everything past this.
   #@param d: The distance that represents the cutoff threshold. We remove all edges above this.
   #@param plot: Creates an easy to view subgraph for the purposes of plotting and overview, but not for statistical analysis.

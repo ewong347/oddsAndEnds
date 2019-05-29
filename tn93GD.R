@@ -1,133 +1,113 @@
 #A process which generates cluster growth data as a function of tn93 cutoff threshold
 #Creates an external .RData file of paired cluster info sets
 
-### USAGE: Rscript tn93GD.R tn93output.csv ###
+### USAGE: Rscript ~/git/tn/tn93GD.R tn93__.txt ###
+#input Date Format, specified with % (ie. %d-%b-%y for day, written month, 2-digit year or  %Y for simple, 4-digit year)
 
 #Import Libraries
 library(igraph)
 library(dplyr)
+library(MASS)
+library(parallel)
+library(ggplot2)
+library(gghighlight)
+library(egg)
+
 
 ## Helper Functions
 #____________________________________________________________________________________________________________________________#
 
-#Models frequency of new cases being linked to old cases based on how old the old cases are
-linkFreq <- function(inG) {
-  #@param inG: A subGraph cut based on a threshold distance, with the latest cases representing New cases (ie. Upcoming cases)
-  #@return: A model new case attachment frequency as a function of case age
+bpeFreq <- function(iG) {
+  # Obtains a data set of all possible Bipartite Edge Frequencies in a 
+  # given subgraph, with the bipartite subsets of vertices representing 
+  # a given year of data
+  #
+  #@param ig: A subGraph cut based on a threshold distance, with the latest 
+  #           cases representing New cases (ie. Upcoming cases)
+  #@return: A data frame of Number of positives (edges from one year to the 
+  #         newest year) with total possible edges and time difference (in 
+  #         years) between the two years
   
-  #Obtain the range of years
-  maxY <- max(V(inG)$year)
-  minY <- min(V(inG)$year)
-  years <- seq(minY, (maxY-1), 1)
-  newV <- V(inG)[year==maxY]
+  # Obtain the range of years
+  maxY <- max(V(iG)$year)
+  minY <- min(V(iG)$year)
+  ys <- seq(minY, (maxY-1), 1)
+  nV <- V(iG)[year==maxY]  # nodes in more recent year of subgraph
   
-  #Obtain the frequency of new cases being connected to each year
-  frequency <- sapply(years, function(x) {
-    presV <- V(inG)[year==x]
-    bridgeE <- E(inG)[presV%--%newV]
-    freq <- length(bridgeE) / (length(presV)*length(newV))
-    return(freq)
+  # Obtain the frequency of new cases being connected to each year
+  frequency <- sapply(ys, function(x) {
+    pV <- V(iG)[year==x]  # nodes in older year
+    bE <- E(iG)[pV%--%nV]  # bipartite edges
+    pos <- length(bE)
+    tot <- length(pV)*length(nV)
+    return(c(pos,tot))
   })
   
   #Assign age to every case
-  age <- sapply(years, function(x) maxY-x)
+  tDiff <- sapply(ys, function(x) maxY-x)
 
   #Create a data frame of case attachment frequency and case age
-  df <- data.frame(Age = age, Frequency = frequency)
+  df <- data.frame(tDiff = tDiff, Positive = frequency[1,], Total = frequency[2,])
 
   return(df)
 }
 
-#Obtains a filtered subgraph of the full graph. Vertices are removed beyond a given year and edges are removed below a cutoff
-subGraph <- function(inG, y, d) {
-  #@param y: The year that represents the latest year. We forward-censor everything past this.
-  #@param d: The distance that represents the cutoff threshold. We remove all edges above this.
-  #@return: The filtered graph (forward censored and cut by a given distance)
-  
-  #Removes vertices beyond a current year
-  outV <- V(inG)[V(inG)$year>y]
-  outG <- inG - outV
-  
-  #Removes edges with distances above a certain cutoff
-  outE <- E(outG)[E(outG)$Distance>=d]
-  outG <- outG - outE
-  
-  return(outG)
-}
-
 #Filters the input graph such that all new cases are only linked to old cases by their closest edge to old cases
-closeFilter <- function(inG) {
-  #@param inG: A subG gaph cut based on a threshold distance, with the latest cases representing New cases (ie. Upcoming cases)
+minFilt <- function(iG) {
+  #@param iG: A subGraph cut based on a threshold distance, with the latest cases representing New cases (ie. Upcoming cases)
   #@return: A filtered version of this same graph
   
-  #Obtain the maximum year
-  y <- max(V(inG)$year)
+  #Obtain the new year
+  nY <- max(V(iG)$year)
   
   #Obtain edge id's of all of the shortest edge lengths from new cases (A new case can only be linked to 1 case)
-  bridgeE <- E(inG)[V(inG)[year==y]%--%V(inG)[year<y]]
+  bE <- E(iG)[V(iG)[year==nY]%--%V(iG)[year<nY]]
   
   #To catch a case where no new cases link to old ones
-  if (length(bridgeE) > 0) {
+  if (length(bE) > 0) {
     
     #Obtain the closest edges for each new case
-    closeE <- unname(sapply(V(inG)[year==y], function(x) {
-      xE <- bridgeE[inc(x)]
+    cE <- mclapply(V(iG)[year==nY], function(x) {
+      xE <- bE[inc(x)]
       
       #To catch a case that is new, but has no linkages to old cases
-      if(length(xE)==0) {
-        return(NULL)
-      }
-      else {    
-        closest <- xE[Distance == min(Distance)]
-        return (closest[1])
-      }
-    }))
-    closeE <- unlist(closeE[!vapply(closeE, is.null, logical(1))])
-    farE <- difference(bridgeE, E(inG)[closeE])
+      ifelse(length(xE)==0, 0, (xE[Distance == min(Distance)])[1] ) 
+    }, mc.cores=8)
     
+    #Remove the entries from new cases that dont connect to  old cases
+    cE <- unname(unlist(cE[cE!=0]))
+
     #Filter out all edges except for the closest edges
-    if(!is.null(closeE)){
-      outG <- inG - farE
+    if(!is.null(cE)){
+      iG <- iG - difference(bE, E(iG)[cE])
     }
   }
   
-  #To return a value in the case that no new cases link to old ones
-  else {
-    outG <- inG
-  }
-  
-  return(outG)
+  return(iG)
 }
 
 #Simulates the growth of clusters
-simGrow <- function(inG, full=F) { 
+simGrow <- function(iG) { 
   
-  #Obtain the newest date
-  newV <- V(inG)[year==newY]
+  #Split the input graph into the new cases and present clusters
+  nV <- V(iG)[year==max(V(iG)$year)]
+  pG <- induced_subgraph(iG, V(iG)[year<max(V(iG)$year)])
+  clu <- components(pG)
 
-  #Obtain a forward-Censored Graph
-  oldG <- inG - newV
-  
-  if (full) {
-    oldG <- oldG-E(oldG)
-  }
-  
-  #Obtain cluster information
-  clu <- components(oldG)
-
-  #Assign cluster growth based on number of new cases embedded in clusters 
+  #Assign cluster growth based on number of new cases linked to old cases in clusters 
   temp <- sapply(1:clu$no, function(x) {
     members <- names(clu$membership[unname(clu$membership)==x])
-    memV <- V(inG)[name%in%members]
-    bridgeE <- E(inG)[memV%--%newV]
+    memV <- V(iG)[name%in%members]
+    bE <- E(iG)[memV%--%nV]
     forecast <- sum(memV$freq) 
-    growth <- length(bridgeE)
+    growth <- length(bE)
     return(c(growth,forecast))
   })
   
+  #Assign growth, forecast (based on diagnostic date), and incidence
   clu$growth <- temp[1,]
   clu$forecast <- temp[2,]
-  clu$inc <- length(newV)
+  clu$inc <- length(nV)
   
   return(clu)
 }
@@ -140,108 +120,82 @@ simGrow <- function(inG, full=F) {
 args = commandArgs(trailingOnly = T)
 input <- read.csv(args[1], stringsAsFactors = F)
 
+#This script will give warnings due to the fact that there are low fit rates on the null model
+options(warn=-1)
+
 #Creates a graph based on the inputted data frame. The tn93 Distances become edge4 attributes
-g <- graph_from_data_frame(input, directed=FALSE, vertices=NULL)
+g <- graph_from_data_frame(input, directed=F, vertices=NULL)
 
 #Adds the ID's and Sample collection years as different vertex attributes for each vertex
-####- TO-DO: Assign Dates by Month -####
 temp <- sapply(V(g)$name, function(x) strsplit(x, '_')[[1]])
 V(g)$name <- temp[1,]
 V(g)$year <- as.numeric(temp[2,])
 
 #Obtain the range of years and the maximum input year
 years <- as.integer(levels(factor(V(g)$year)))
-newY <- max(years)
-
-## Obtain a set models of case linkage frequency based on age
-#__________________________________________________________________________________________________________________________#
-
-#Initialize a list of cases
-ldf <- {}
+nY <- max(years)
+V(g)$tDiff <- sapply(V(g)$year, function(x) nY-x)
 
 #Initialize a set of cutoffs to observe
 cutoffs <- seq(0.005, 0.05, 0.001)
 
-#Progress tracking
-print("Modelling age and cutoff effects on node linkage to new cases...")
+g <- minFilt(g)
 
-#Create a set of frequency data, representing the frequency of new case additions as a function of old case age
-for (y in years) {
-  #Progress tracking
-  print(noquote(paste0(as.integer((1-(newY-y)/length(years))*100) , "%")))
-  
-  #Obtain a subgraph of cases below a given year and close-filtered edges to the new year
-  cfG <- g - V(g)[year>y]
-  cfG <- closeFilter(cfG)
-  
-  #To catch the first year of a set of years (no retrospective years to count to)
-  if (y==min(years)) {
-    next()
-  }
-  
-  #Obtain a set of link frequencies for this year at various cutoffs
-  ldfy <- lapply(cutoffs, function(d) {
-    subG <- subGraph(cfG, y, d)
-    linkFreq(subG)
+#Create a set of subgraphs at each cutoff
+gs <- mclapply(cutoffs, function(d) {
+  subgraph.edges(g,E(g)[Distance<=d], delete.vertices = F)
+}, mc.cores=8) 
+names(gs) <- cutoffs
+
+## Obtain a set models of case linkage frequency based on age
+ageD <- mclapply(gs, function(x){
+  # (x) now holds a graph at a different cutoff
+  l <- lapply(rev(years[2:(length(years)-1)]), function(y){
+    #print(y)
+    subG <- minFilt(induced_subgraph(x, V(x)[year<=y]))
+    bpeFreq(subG)
   })
-
-  #Add the set of link frequencies to our growing data set
-  ldf <- cbind(ldf, ldfy)
-}
-
-#Collapse data to a dataframe per cutoff, with case Age and Frequency data for each data frame
-ageD <- lapply(1:nrow(ldf), function(x) bind_rows(ldf[x,]))
-names(ageD) <- cutoffs
+  bind_rows(l)
+}, mc.cores=8) 
 
 #Save data in accessable file
-save(ageD, file = paste0(gsub("\\..*", "", args), "AD.RData"))
+saveRDS(ageD, file = paste0(gsub("\\..*", "", args), "AD.rds"))
 
 ## Generate Growth data
 #__________________________________________________________________________________________________________________________#
 
-#Obtain a filtered graph for the purposes of measuring growth
-g <- closeFilter(g)
-
-#Initialize the dataframe of results
-res <- {}
-
-#Progress tracking
-print("Modelling cutoff effects on case growth...")
-
-#Generate growth data for each cutoff in a series of cutoffs
-for (d in cutoffs) {
-  #Progress tracking
-  print(noquote(paste0(as.integer(d/max(cutoffs)*100), "%")))
-  
-  #Obtain a model of case connection frequency to new cases as predicted by individual case age 
-  ageDi <- ageD[[as.character(d)]]
-  #fit <- sapply(levels(factor(df$Age)), function(x) mean(df$Frequency[which(df$Age == x)]))
-  
-  #Creates an exponential model of case growth with respect to age data
-  m <- sapply(levels(factor(ageDi$Age)), function(x) {
-    mean(i$Frequency[ageDi$Age==x])
-  })
-  df <- data.frame(Age = as.numeric(names(m)), Freq = unname(m))
-  mod <- nls(Freq ~ a*Age^b, data = df, start = list(a=1, b=1))
-  
+res <- mclapply(cutoffs, function(d) {
   #Obtain a subGraph at the maximum year, removing edges above the distance cutoff and ensuring no merging by removing, non-closest edges to new cases
-  subG <- subGraph(g,newY,d)
+  subG <- gs[[as.character(d)]]
+  
+  #Obtain a model of case connection frequency to new cases as predicted by individual case ag
+  #This data may contain missing cases, hense the complete cases addition
+  ageDi <- ageD[[as.character(d)]]
+  
+  mod <- glm(cbind(Positive, Total) ~ tDiff, data=ageDi, family='binomial')
   
   #Assign a predicted growth value to each member of the graph
-  V(subG)$freq <- predict(mod, df)
-
-  #Obtain growth based on two models restricted model
-  growth <- simGrow(subG) 
-  growthF <- simGrow(subG, full=T)
-  l <- list(growth, growthF)
+  V(subG)$freq <- predict(mod, data.frame(tDiff=V(subG)$tDiff), type='response')
   
-  #Add to growing dataframe of results
-  res <- cbind(res, l)  
-} 
+  #Obtain growth based on two models restricted model
+  clu <- simGrow(subG)
+  
+  #Place growth and forecast data in dfs for fit and full growth
+  df1 <- data.frame(Growth = clu$growth, Pred = clu$forecast)
+  df2 <- data.frame(Growth = clu$growth, Pred = clu$csize * (sum(clu$growth)/sum(clu$csize)))
+  
+  #Model growth as a function of forecast for fit and full growth models
+  mod1 <- glm(Growth ~ Pred, data = df1, family = "poisson")
+  mod2 <- glm(Growth ~ Pred, data = df2, family = "poisson")
+  
+  #Calculate GAIC
+  clu$gaic <- mod1$aic-mod2$aic
+  
+  return(clu)
+}, mc.cores=8)
 
 #Label data
-rownames(res) <- c("Restricted", "Full")
-colnames(res) <- cutoffs
+names(res) <- cutoffs
 
-#Save data in accessable file
-save(res, file = paste0(gsub("\\..*", "", args), "GD.RData"))
+#Save data in accessable files
+saveRDS(res, file = paste0(gsub("\\..*", "", args), "GD.rds"))
