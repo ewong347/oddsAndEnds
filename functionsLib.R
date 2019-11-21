@@ -1,85 +1,8 @@
-##Functions Library (Old and New)
-####- TO-DO: Tidy, delete code that is so broken or mislead that it's not worth having -####
-
-#Obtain the VPC, a measure of variance due to the aggregate level over total variance
-vpc <- function(res=res){
-  stat <- sapply(1:(ncol(res)), function(x) {
-    #Extract full and fit data
-    fit <- res[[1,x]]
-    full <- res[[2,x]]
-    
-    #Calculate VPC
-    var(fit$growth) / var(full$growth)
-  })
-  
-  #Present and return data
-  plot(colnames(res), stat, ylab = "VPC", xlab = "Cutoff")
-  return(stat)
-}
-
-#Obtain the Poisson Probability map of relative growth
-ppmap <- function(res=res) {
-  
-  stat <- sapply(1:ncol(res), function(x) {
-    #Extract fit data
-    fit <- res[[1,x]]
-    
-    #Obtain an expectation based off of overall cluster growth
-    exp <- (fit$csize)*(sum(fit$growth)/sum(fit$csize))
-    
-    #zscore can be calculated based off of this diff
-    diff <- fit$growth - exp
-    zscore <- diff / sqrt(exp)
-    print(zscore)
-    return(var(zscore))
-  })
-  
-  #Present and return data
-  plot(colnames(res), stat, ylab = "Poisson Probability", xlab = "Cutoff")
-  return(stat)
-}
-
-#Obtains an estimate of cluster growth based on the ages of cases within
-forecast <- function(inG, fit) {
-  #@param inG: A graph cut based on a threshold distance, with the latest casses representing New cases (ie. Upcoming cases)
-  #@param fit: The associated model of case link frequency based on case age. 
-  #@return: An attribute for clu representing the estimation of their growth based on case ages
-  
-  #Obtain the new year, from which we will measure growth
-  newY <- max(V(inG)$year)
-  
-  ####- TO-DO: Extract coeeficients from model data -####
-  
-  #Assign a predicted growth value to each member of the graph
-  V(inG)$freq <- sapply(V(inG)$year, function(x) {
-    age <- newY - x
-    if (age==0) {return(0)}
-    else{
-      ####- TO-DO: Use coefficients to establish age -####
-      freq <- unname(fit[age])
-      weight <- sum(sample(c(1,0), length(V(inG)[year==newY]), replace = T, prob = c(freq, 1-freq)))
-    }
-  })
-  
-  #Obtain cluster information
-  clu <- components(inG)
-  
-  #Obtain a prediction of growth based on the predicted growth of a cluster's members  
-  forecast <- sapply(1:clu$no, function(x) {
-    members <- names(clu$membership[unname(clu$membership)==x])
-    memV <- V(inG)[name%in%members]
-    presMV <- memV[year<newY]
-    sumFreq <- sum(presMV$freq)
-    return(sumFreq)
-  })
-  
-  return(forecast)
-}
+##Functions Library 
 
 #Obtains the Growth of clusters based on which clusters hold new cases
-growF <- function(inG, fit) {
+embGrow <- function(inG) {
   #@param inG: A subGraph cut based on a threshold distance, with the latest cases representing New cases (ie. Upcoming cases)
-  #@param fit: To pass to forecast
   #@return: Cluster information including growth and estimated growth for the Present year (ie. The year before the newest year in inG)
   
   #Obtain the new year
@@ -97,97 +20,12 @@ growF <- function(inG, fit) {
   #Obtain cluster information
   clu <- components(inG)
   
-  #Assign the previously established forecast to the cluster information
-  clu$forecast <- forecast(inG, fit)
-  
   #Assign the growth of individual clusters (of size 1), based on the newly formatted graph
   clu$growth <- sapply(1:clu$no, function(x){
     members <- names(clu$membership[unname(clu$membership)==x])
     memV <- V(inG)[name%in%members]
     newV <- memV[year==newY]
     return(length(newV))
-  })
-  
-  return(clu)
-}
-
-#Obtains the Growth of clusters based on which clusters hold new cases
-grow <- function(inG, fit) {
-  #@param inG: A subGraph cut based on a threshold distance, with the latest cases representing New cases (ie. Upcoming cases)
-  #@param fit: To pass to forecast
-  #@return: Cluster information including growth and estimated growth for the Present year (ie. The year before the newest year in inG)
-  
-  #Obtain the newest date
-  newY <- max(V(inG)$year)
-  
-  #Obtain cluster information
-  clu <- components(inG)
-  
-  #Assign the previously established forecast to the cluster information
-  clu$forecast <- forecast(inG, fit)
-  
-  #obtain the number of new cases
-  clu$inc <- length(V(inG)[year==newY])
-  
-  #Assign cluster growth based on number of new cases embedded in clusters 
-  clu$growth <- sapply(1:clu$no, function(x) {
-    members <- names(clu$membership[unname(clu$membership)==x])
-    memV <- V(inG)[name%in%members]
-    newMV <- memV[year==newY]
-    return(length(newMV))
-  })
-  
-  return(clu)
-}
-
-linkFreq <- function(inG) {
-  maxY <- max(V(inG)$year)
-  minY <- min(V(inG)$year)
-  
-  years <- seq(minY, (maxY-1), 1)
-  
-  frequency <- sapply(years, function(x) {
-    presV <- V(inG)[year==x]
-    newV <- V(inG)[year==maxY]
-    links <- length(E(inG)[presV%--%newV])
-    relLinks <- links / length(presV)
-    return(relLinks)
-  })
-  
-  age <- sapply(years, function(x) maxY-x)
-  
-  df <- data.frame(Age = age, Frequency = frequency)
-  
-  fit <- lm(Frequency~Age, data = df)
-  
-  return(fit)
-}
-
-forecastAge <- function(inG, full=F) {
-  
-  newY <- max(V(inG)$year)
-  presG <- inG - V(inG)[year==newY]
-  
-  if (full) {
-    presG <- presG - E(presG)
-    inG <- inG - E(inG)[!inc(V(inG)[year==newY])]
-  }
-  
-  fit <- linkFreq(presG)
-  intercept <- unname(fit$coefficients[1])
-  slope <- unname(fit$coefficients[2])
-  
-  V(inG)$freq <- sapply(V(inG)$year, function(x) slope*(newY-x)+intercept)
-  V(inG)$freq[V(inG)$freq < 0] <- 0
-  
-  clu <- components(inG)
-  
-  clu$forecast <- sapply(1:clu$no, function(x) {
-    members <- names(clu$membership[unname(clu$membership)==x])
-    memV <- V(inG)[name%in%members]
-    presMV <- memV[year<newY]
-    sumFreq <- as.integer(sum(presMV$freq))
-    return(sumFreq)
   })
   
   return(clu)
@@ -227,104 +65,131 @@ forecastRG <- function(inG, clu, full=F) {
   return(rrG)
 }
 
-growEmb <- function(inG) {
-  #@param inG: A subG gaph cut based on a threshold distance, with the latest casses representing New cases (ie. Upcoming cases)
-  #@return: Cluster information for the Present year (ie. The year before the newest year in inG)
-  
-  newY <- max(V(inG)$year)
-  
-  #Obtain cluster information
-  clu <- components(inG)
-  
-  clu$growth <- sapply(1:clu$no, function(x) {
-    members <- names(clu$membership[unname(clu$membership)==x])
-    memV <- V(inG)[name%in%members]
-    newMV <- memV[year==newY]
-    return(length(newMV))
-  })
-  
-  return(clu)
+#To handle input as dates instead of years (Pre-Processing for the NA dataset)
+if (dates == T) {
+  y <- as.Date(temp[2,])
+  #Handling day-month-year common format
+  yDMY <- as.Date(temp[2,], format="%d-%b-%y")
+  y[is.na(y)] <- yDMY[!is.na(yDMY)]
+  V(g)$year <- as.integer(as.integer(y) / 120) #Binned into 120 day blocks
 }
 
-#Simulates growth of current clusters by adding clusters from the upcoming year, with the newest year provided considered "the upcoming" year
-growSim <- function(inG, alt=F, full=F) {
-  #@param inG: A subG gaph cut based on a threshold distance, with the latest casses representing New cases (ie. Upcoming cases)
-  #@param alt: An option determining whether or not to resolve cluster growth as weighted nodes or closest nodes
-  #@param full: An option determining whether or not this is the growth estimate for a fully saturated model
-  #@return: Cluster information for the Present year (ie. The year before the newest year in inG)
-  
-  #Obtain the present graph (ie. the subgraph contain all cases before the the latest/"upcoming" year) and it's cluster info
-  newV <- V(inG)[year==max(year)]
-  presG <- inG - newV
-  
-  #If the full option is selection, we de-aggregate the present year. All vertices are considered clusters of size 1
-  if (full) {presG <- presG - E(presG)}
-  
-  clu <- components(presG)  #Obtain initial cluster info (cluster membership, cluster sizes, number of clusters)
-  clu$growth <- integer(clu$no)  #Initialize cluster growth (ie. The appearence of new cases in each cluster) at 0 for each cluster
-  clu$inc <- 0   #Initialize cluster incidence (ie. The total number of new cases added over the total number of present cases) at 0
-  
-  #Establishes the connections between present and new years to measure growth
-  bridgeE <- E(inG)[newV%--%V(inG)[-newV]]
-  
-  #If there are no bridging Edges between present and new cases, there is no growth and the initializeed values represent the cluster growth
-  if (length(bridgeE)>0) {
-    
-    #Establishes a bipartite graph with only the edges that link new cases to present cases
-    bridgeG <- subgraph.edges(inG, bridgeE, delete.vertices=T)
-    newBridgeV <- V(bridgeG)[year==max(year)]
-    presBridgeV <- V(bridgeG)[-newBridgeV]
-    
-    #Calculate incidence based on the new cases linked to present cases
-    clu$inc <- length(newBridgeV) / length(V(presG))
-    
-    #Branches here to differ between 2 different methods of resolving new cases which bridge 2 clusters
-    if(alt){
-      
-      #Obtain edge id's of all of the shortest edge lengths (A case can only be linked to 1 case)
-      closeE <- unname(sapply(newBridgeV, function(x) {
-        xE <- E(bridgeG)[inc(x)]
-        closest <- xE[Distance == min(Distance)]
-        return (closest[[1]])
-      }))
-      
-      #Filter bridge again to only include the shortest edges from new cases
-      bridgeG <- subgraph.edges(bridgeG, E(bridgeG)[closeE], delete.vertices=T)
-      newBridgeV <- V(bridgeG)[year==max(year)]
-      
-      #Obtain a table of values, representing the growth of given cluster indices
-      growth <- unname(sapply(newBridgeV, function(x) {
-        n <- neighbors(bridgeG, x, "all")
-        cluId <- unname(clu$membership[names(clu$membership) %in% n$name])
-        return(c(cluId, 1))
-      }))
-      
-    } else {
-      
-      #Obtain the weight of a future case based on the number of past cases it's added to
-      weight <- sapply(newBridgeV, function(x) 1/length(E(bridgeG)[inc(x)])) 
-      
-      #Obtain a table of every link from past to future cases and the weight that those links are worth
-      growth <- unname(sapply(presBridgeV, function(x){
-        point <- sum(unname(weight[neighbors(bridgeG, x, "all")$name])) 
-        cluId <- unname(clu$membership[V(bridgeG)[x]$name])
-        return (c(cluId, point))
-      }))
-    }
-    
-    #Assign growth as an attribute of the set of clusters based off of the weighted information from growth 
-    clu$growth <- sapply(seq(1,clu$no), function(x) round(sum(growth[2,][growth[1,]==x])))
-  }
-  
-  return(clu)
+#For the case of handling missing data
+temp <- {}
+temp$Frequency <- ageDi$Frequency[!is.nan(ageDi$Frequency)]
+temp$Age <- ageDi$Age[!is.nan(ageDi$Frequency)]
+ageDi <- temp
+
+## Skeleton Code For plotting From GD results
+stat <- sapply(1:(ncol(res)-1), function(x) {
+  fit <- res[[1,x]]
+  mean(fit$growth)
+})
+plot(head(colnames(res), -1), stat, ylab = "Mean Cluster Growth" , xlab= "Cutoff Threshold", cex.lab = 1.65, cex.axis = 1.3, cex = 1.5, pch = 20)
+
+#For GAIC edits on already processed Data
+LastMin <- function(res,args) {
+  UnW <- gaic(res)
+  saveRDS(UnW, file = paste0(gsub("\\..*", "", args), "UnW.rds"))
+  DisA <- gaic(res, agg=T)
+  saveRDS(UnW, file = paste0(gsub("\\..*", "", args), "DisA.rds"))
 }
+
+denZero <- function(inG){
+  stat <- sapply(as.integer(levels(as.factor(V(in$year))), function(i) {
+    gsub <- induced_subgraph(g, V(g)[year==i])
+    edge_density(gsub)
+  }))
+  return(stat)
+}
+
+
+
+#Plot Making tDiff Data Figure 
+exptDiff <- function(ageD,letter) {
+  cuts <- sapply(seq(6,16,5), function(x){
+    i <- ageD[[x]]
+    sapply(levels(factor(i$tDiff)), function(x) {
+      mean(i$Frequency[i$tDiff==x])
+    })
+  })
+  df <- data.frame(tDiff=as.numeric(levels(factor(ageD[[1]]$tDiff))), pt1=cuts[,1], pt2= cuts[,2], pt3=cuts[,3])
+  
+  pngTitle <- paste0("fig1", letter,".png")
+  png(pngTitle, width=1500, height=1000)
+  
+  mod1 <- lm(pt1 ~ a*tDiff^b, data = df, start = list(a=1,b=1), control = list(maxiter=1000) )
+  a1 <- mod1$m$getPars()[[1]]
+  b1 <- mod1$m$getPars()[[2]]
+  df$mod1 <- a1*df$tDiff^b1
+  
+  mod2 <- nls(pt2 ~ a*tDiff^b, data = df, start = list(a=1,b=1), control = list(maxiter=1000) )
+  a2 <- mod2$m$getPars()[[1]]
+  b2 <- mod2$m$getPars()[[2]]
+  df$mod2 <- a2*df$tDiff^b2
+  
+  mod3 <- nls(pt3 ~ a*tDiff^b, data = df, start = list(a=1,b=1), control = list(maxiter=1000) )
+  a3 <- mod3$m$getPars()[[1]]
+  b3 <- mod3$m$getPars()[[2]]
+  df$mod3 <- a3*df$tDiff^b3
+  
+  lines <- c("0.010" = "blue", "0.015" = "black", "0.020" = "orange")
+  p <- ggplot(df, aes(x=tDiff)) +
+    labs(title=letter, x="Time Between Case Sample Collection", y="Mean Frequency of Bipartite Edges") +
+    theme(axis.title.x = element_text(size=20, margin=margin(t=20)),
+          axis.title.y = element_text(size=20, margin=margin(r=20)), 
+          axis.text.x = element_text(size=20), 
+          axis.text.y = element_text(size=20),
+          plot.title = element_text(size=35),
+          legend.text = element_text(size=25),
+          legend.title = element_text(size=30)) +
+    geom_point(aes(y=pt1, colour="0.010")) +
+    geom_point(aes(y=pt2, colour="0.015")) +
+    geom_point(aes(y=pt3, colour="0.020")) +
+    geom_smooth(aes(y=mod1, colour="0.010"), method="lm", formula=y~exp(-x), se=F) +
+    geom_smooth(aes(y=mod2, colour="0.015"), method="lm", formula=y~exp(-x), se=F) +
+    geom_smooth(aes(y=mod3, colour="0.020"), method="lm", formula=y~exp(-x), se=F) +
+    scale_colour_manual(name="TN93 Cutoff Threshold", values=lines)
+  
+  print(p)
+  dev.off()
+}
+
+ADfit2 <- function(ageD) {
+  cuts <- sapply(ageD, function(i) {
+    m <- sapply(levels(factor(i$tDiff)), function(x) {mean(i$Frequency[i$tDiff==x])}) 
+    fit <- fitdistr(m, "exponential")
+    test <- ks.test(m, "pexp", fit$estimate)
+    return(test[[2]])
+  })
+  return(cuts)
+}
+
+ADfit1 <- function(ageD) {
+  lapply(ageD, function(ageDi) {
+    mod <- glm(cbind(Positive, Total) ~ tDiff, data=ageDi, family='binomial')
+    summary(mod)
+  })
+}
+
+edgeFreq <- function(ageD){
+  cuts <- sapply(ageD, function(i){
+    sapply(levels(factor(i$tDiff)), function(x) {
+      mean(i$Frequency[i$tDiff==x])
+    })
+  })
+  return(cuts)
+}
+
+res <- GDna
+sapply(1:(ncol(res)), function(x) {
+  fit <- res[[1,x]]
+  sum(fit$growth)
+})
+
 
 #Obtains a filtered subgraph of the full graph. Vertices are removed beyond a given year and edges are removed below a cutoff
-subGraphP <- function(inG, y, d, plot=T) {
-  #@param y: The year that represents the latest year. We forward-censor everything past this.
-  #@param d: The distance that represents the cutoff threshold. We remove all edges above this.
-  #@param plot: Creates an easy to view subgraph for the purposes of plotting and overview, but not for statistical analysis.
-  #@return: The filtered graph (forward censored and cut by a given distance)
+graphPlot <- function(inG, y, d, col) {
   
   #Removes vertices beyond a current year
   outV <- V(inG)[V(inG)$year>y]
@@ -335,138 +200,158 @@ subGraphP <- function(inG, y, d, plot=T) {
   outG <- outG - outE
   
   #Plot option ignores clusters of size 1 and provides a graph (for ease of overview, not for calculations)
-  if(plot){ 
-    outG <- subgraph.edges(outG, E(outG), delete.vertices = T)
-    plot(outG, vertex.size = 2, vertex.label = NA, edge.width = 0.65, edge.color = 'black')
-    print(components(outG))
-  } 
-  
-  return(outG)
+  outG <- subgraph.edges(outG, E(outG), delete.vertices = T)
+  plot(outG, vertex.size = 2, vertex.label = NA, vertex.color= col,
+       edge.width = 0.65, edge.color = 'black', 
+       margin = c(0,0,0,0))
+  #sub=paste0(title, " Network, at d=", d),
 }
 
-#Obtains several different statistics from a variety of different modelling options
-####-TO-DO: Change term for acc and zscore, investigate Sby1, and RGby1 -####
-stats <- function(clu) {
-  #@param clu: A set of cluster information annotated with incidence and cluster growth at a given year and cutoff
-  #@return: A list of statistics based on the provided set of clusters
-  
-  #Obtain an expectation based off of overall cluster growth
-  exp <- clu$inc*(clu$csize)
-  
-  #zscore can be calculated based off of this diff
-  diff <- clu$growth - exp
-  zscore <- diff / sqrt(exp)
-  
-  #Obtain a prediction based on the function forecasting cluster growth 
-  pred <- clu$pred
-  
-  #Initialize the list of statistics
-  stats <- list()
-  
-  #Generate data frame at level of clusters
-  df <- data.frame(Expectation=exp, Size=clu$csize, Growth=clu$growth, RelGrowth=clu$growth/clu$csize, Prediction=pred)
-  
-  stats$acc <- glm(RelGrowth~Prediction, data=df, family="poisson") #Models growth against prediction 
-  
-  stats$zscore <- mean(zscore) #The mean zscore (representing probability based on expection)
-  
-  stats$prob <- glm(Growth~Expectation, data=df, family = "poisson") #Models growth against calculated expectation
-  
-  stats$GbyS <- glm(Growth~Size, data=df, family="poisson") #Models growth by size
-  
-  stats$Sby1 <- glm(Size~1, data=df, family="poisson") #Models how well size follows a poisson distribution
-  
-  stats$Gby1 <- glm(Growth~1, data=df, family="poisson") #Models how well growth follows a poisson distribution
-  
-  stats$RGby1 <- glm(RelGrowth~1, data=df, family="poisson") #Models how well relative growth follows a poisson distribution
-  
-  stats$var <- var(clu$growth/clu$csize) #The variance of relative growth
-  
-  return(stats)
-}
-
-#Obtain the proportion of growing clusters
-gr <- function(res=res) {
-  
-  stat <- sapply(1:(ncol(res)-1), function(x) {
-    #Extract fit data
-    fit <- res[[1,x]]
-    
-    #Obtain the ratio of growing clusters over total clusters
-    length(fit$growth[fit$growth>0])/fit$no
+lintDiff <- function(ageD, letter) {
+  cuts <- sapply(seq(1,16,5), function(x){
+    ageDi <- ageD[[x]]
+    mod <- glm(cbind(Positive, Total) ~ tDiff, data=ageDi, family='binomial')
+    predict(mod, data.frame(tDiff=seq(1,12,1)), type='response')
   })
   
-  #Present and return data
-  plot(head(colnames(res),-1), stat, ylab = "Growth Ratio", xlab = "Cutoff")
-  return(stat)
+  df <- data.frame(tDiff = seq(1,12,1), pt1 = cuts[,1], pt2 = cuts[,2], pt3 = cuts[,3], pt4 = cuts[,4] )
+  lines <- c("0.005"= "royalblue", "0.010" = "blue", "0.015" = "dark blue", "0.020" = "black")
+  
+  p <- ggplot(df, aes(x=tDiff)) +
+    labs(title=letter, x="Time Difference (collection year)", y="Mean of Edge Density in Bipartite Graph") +
+    theme(axis.title.x = element_text(size=12, margin=margin(t=10)),
+          axis.title.y = element_text(size=12, margin=margin(r=10)), 
+          axis.text.x = element_text(size=10), 
+          axis.text.y = element_text(size=10),
+          plot.title = element_text(size=20, hjust=0.5, vjust=-0.1, margin = margin(b=10, t=10)),
+          legend.text = element_text(size=12),
+          legend.title = element_text(size=15)) +
+    geom_line(aes(y=pt1, colour="0.005")) +
+    geom_line(aes(y=pt2, colour="0.010")) +
+    geom_line(aes(y=pt3, colour="0.015")) +
+    geom_line(aes(y=pt4, colour="0.020")) +
+    scale_colour_manual(name="TN93 Cutoff Threshold", values=lines)
 }
 
-#Obtains statistics at a set of cutoffs for the same input graph (initially fully connected)
-####-TO-DO: Confirm comparisons between Seattle results to select actual methods -####
-analyzeG <- function(cutoffs,year=max(years), inG=g) {
-  #@param cutoffs: The cutoffs sequence, this will become the independant variable for all results
-  #@param year: The year representing the newest (upcoming) year. Ideally the latest year
-  #@param inG: The graph to be worked upon. Ideally the complete graph with all connections
-  #@return: A dataframe of all calculated results
+linGrowth <- function(growthD) {
   
-  #Initialize the dataframe of results
-  res <- {} 
+  st <- sapply(growthD[[1]], function(x) {
+    c(sum(x$growth), mean(x$growth))
+  })
   
-  for (d in cutoffs) {
-    print(d) #Important for progress tracking
-    
-    #Obtain and analyze growth statistics for a given cutoff
-    subG <- subGraph(inG,year,d)
-    growth <- growG(subG) ##COMPARE: growth <- growthSim(subG) OR growthSim(subG, alt=T)
-    fit <- stats(growth)
-    
-    #Obtain a fully saturated model for the same growth. This will have no cluster aggregation, instead tracking individual new case links
-    growth <- growG(subG, full=T) ##COMPARE: growth <- growthSim(subG, full=T) OR growthSim(subG, alt=T, full=T)
-    full <- stats(growth) 
-    
-    #Obtain the Forecast Accuracy
-    #This is a measure of how well the relative growth is predicted by the forecast function
-    #Accuracy <- (full$acc)$deviance - (fit$acc)$deviance ##COMPARE: Accuracy <- (fit$acc)$null.deviance - (fit$acc)$deviance
-    Accuracy <- (fit$acc)$null.deviance - (fit$acc)$deviance
-    
-    #Obtain the mean zscore for growths 
-    #This is a measure of how unlikely growth rates are based on a theoretical distribution
-    zscoreMean <- fit$zscore
-    
-    #Obtain Deviance and GAICC for a Poisson Probability Map
-    #This is a measure of how well the probabilities of growth rates follow a poisson distribution
-    DeviancePPMap <- (full$prob)$deviance - (fit$prob)$deviance ##COMPARE: DeviancePPMap <- (fit$prob)$null.deviance - (fit$prob)$deviance
-    GAICPPMap <- (fit$prob)$aic- (full$prob)$aic
-    
-    #This is a measure of how well the growth is predicted by size
-    DevianceGbyS <- (full$GbyS)$deviance - (fit$GbyS)$deviance ##COMPARE: DevianceGbyS <- (fit$GbyS)$null.deviance - (fit$GbyS)$deviance
-    GAICGbyS <- (fit$GbyS)$aic- (full$prob)$aic
-    
-    #This is a measure of how well size follows a poisson distribution
-    DevianceSby1 <- (full$Sby1)$deviance - (fit$Sby1)$deviance ##COMPARE: DevianceSby1 <- (fit$GbyS)$null.deviance - (fit$GbyS)$deviance
-    GAICSby1 <- (fit$Sby1)$aic- (full$Sby1)$aic
-    
-    #This is a measure of how well growth follows a poisson distribution    
-    DevianceGby1 <- (full$Gby1)$deviance - (fit$Gby1)$deviance ##COMPARE: DevianceGby1 <- (fit$GbyS)$null.deviance - (fit$GbyS)$deviance
-    GAICGby1 <- (fit$Gby1)$aic- (full$Gby1)$aic
-    
-    #This is a measure of how well Relative growth follows a poisson distribution
-    DevianceRGby1 <- (full$RGby1)$deviance - (fit$RGby1)$deviance ##COMPARE: DevianceRGby1 <- (fit$GbyS)$null.deviance - (fit$GbyS)$deviance
-    GAICRGby1 <- (fit$RGby1)$aic- (full$RGby1)$aic
-    
-    #Obtain the Variance partition coefficient
-    #This is a measure of how much variance can be attributed to this particular clustering level
-    VPC <- fit$var / full$var
-    
-    stats <- c(Accuracy, zscoreMean, DeviancePPMap, GAICPPMap, DevianceGbyS, GAICGbyS, DevianceSby1, GAICSby1, DevianceGby1, GAICGby1, DevianceRGby1, GAICRGby1, VPC)
-    
-    #Expand the result df with this data
-    res <- cbind(res, stats)
-  }
+  na <- sapply(growthD[[2]], function(x) {
+    c(sum(x$growth), mean(x$growth))
+  })
   
-  #Apply labels for the results table
-  colnames(res) <- cutoffs
-  rownames(res) <- c("Accuracy", "zscoreMean", "DeviancePPMap", "GAICPPMap", "DevianceGbyS", "GAICGbyS", "DevianceSby1", "GAICSby1", "DevianceGby1", "GAICGby1", "DevianceRGby1", "GAICRGby1", "VPC")
+  lines <- c("Seattle" = "blue", "North Alberta" = "orangered3")
+  lines2<- c("Mean Growth" = "solid", "Sum Growth"="dashed")
+  df <- data.frame(Threshold = seq(0.005,0.05,0.001), stTotalGrowth = st[1,], stMeanGrowth = st[2,],
+                   naTotalGrowth = na[1,], naMeanGrowth = na[2,])
   
-  return(res)
+  ggplot(df, aes(x=Threshold)) +
+    labs(title="" ,x= "TN93 Distance Cutoff Threshold", y="Growth of Clusters") +
+    theme(axis.title.x = element_text(size=12, margin=margin(t=10)),
+          axis.title.y = element_text(size=12), 
+          axis.text.x = element_text(size=10), 
+          axis.text.y = element_text(size=10),
+          plot.title = element_text(size=20, hjust=-0.05, vjust=-0.05),
+          legend.text = element_text(size=15)) +
+    geom_line(aes(y=stMeanGrowth, colour = "Seattle", linetype="Mean Growth"), size=1) +
+    geom_line(aes(y=stTotalGrowth, colour = "Seattle", linetype="Sum Growth"), size=1) +
+    geom_line(aes(y=naMeanGrowth, colour = "North Alberta", linetype="Mean Growth"), size=1.0) +
+    geom_line(aes(y=naTotalGrowth, colour = "North Alberta", linetype="Sum Growth"), size=1.0) +
+    scale_colour_manual(name="", values=lines)+
+    scale_linetype_manual(name="", values =lines2 )
 }
+
+gaicPlot <- function(growthD) {
+  
+  st <- sapply(growthD[[1]], function(x) {x$gaic})
+  na <- sapply(growthD[[2]], function(x) {x$gaic})
+  
+  
+  df <- data.frame(Threshold = seq(0.005,0.04,0.001), GAIC1 = head(st, -10), GAIC2= head(na, -10))
+  lines <- c("Seattle" = "blue", "North Alberta" = "orangered")
+  
+  ggplot(df, aes(x=Threshold)) +
+    theme(axis.title.x = element_text(size=12, margin=margin(t=10)),
+          axis.title.y = element_text(size=12), 
+          axis.text.x = element_text(size=10), 
+          axis.text.y = element_text(size=10),
+          plot.title = element_text(size=20, hjust=-0.05, vjust=-0.05),
+          legend.text = element_text(size=15)) +
+    geom_line(aes(y=GAIC1, colour="Seattle"), size=1.2)+
+    geom_line(aes(y=GAIC2, colour="North Alberta"), size=1.2)+
+    geom_vline(xintercept = c(df$Threshold[df$GAIC1==min(df$GAIC1)],df$Threshold[df$GAIC2==min(df$GAIC2)]),linetype=4, colour="black", alpha=0.5)+
+    geom_text(aes(df$Threshold[df$GAIC1==min(df$GAIC1)],5,label = df$Threshold[df$GAIC1==min(df$GAIC1)],vjust =1.5))+
+    geom_text(aes(df$Threshold[df$GAIC2==min(df$GAIC2)],5,label = df$Threshold[df$GAIC2==min(df$GAIC2)],vjust =1.5))+
+    labs(title="", x= "TN93 Distance Cutoff Threshold", y="GAIC")+ 
+    scale_colour_manual(name="", values=lines)
+}
+
+distPlot <- function(inG1,inG2) {
+  h1 <- hist(E(inG1)$Distance, plot=F)
+  h2 <- hist(E(inG2)$Distance, plot=F, breaks=h1$breaks)
+  
+  df <- data.frame(st = h1$counts/choose(length(V(inG1)),2), na = h2$counts/choose(length(V(inG2)),2))
+  
+  lines <- c("Seattle" = "blue", "North Alberta" = "orangered3")
+  
+  ggplot(df, aes(x=head(h1$breaks, -1))) +
+    labs(title="", x="Weight of Edge (TN93 Distance)", y="Frequency") +
+    theme(axis.title.x = element_text(size=12, margin = margin(t=10)),
+          axis.text.x = element_text(size=10), 
+          axis.text.y = element_text(size=10),
+          plot.title = element_text(size=20, hjust=0.5, vjust=-0.1, margin = margin(b=10)))+
+    geom_bar(aes(y=st, fill="Seattle"), stat="identity", alpha=0.5) + 
+    geom_bar(aes(y=na, fill="North Alberta"), stat="identity",  alpha=0.5 ) + 
+    scale_fill_manual(name="", values=lines) 
+}
+
+yearPlot <- function(inG1, inG2) {
+  h1 <- unname(table(V(inG1)$year))
+  h2 <- unname(table(V(inG2)$year))
+  
+  df <- data.frame(st = c(h1,0), na = c(0,0,0,0,0,0,0, h2) )
+  
+  lines <- c("Seattle" = "blue", "North Alberta" = "orangered3")
+  
+  ggplot(df, aes(x=seq(2000,2013))) +
+    labs(title="", y="Frequency", x="Year of Vertex (Sequence Collection Year)") +
+    theme(axis.title.x = element_text(size=12, margin = margin(t=10)),
+          axis.text.x = element_text(size=10), 
+          axis.text.y = element_text(size=10),
+          plot.title = element_text(size=20, hjust=0.5, vjust=-0.1, margin = margin(b=10)))+
+    geom_bar(aes(y=st, fill="Seattle"), stat="identity", alpha=0.5) + 
+    geom_bar(aes(y=na, fill="North Alberta"), stat="identity",  alpha=0.5 ) + 
+    scale_fill_manual(name="", values=lines) 
+}
+
+###############
+#Linear Update
+####################################################################
+
+GDst <- readRDS("pub1/stDGD.rds")
+GDna <- readRDS("pub1/naDGD.rds")
+
+ADst <- readRDS("stDAD.rds")
+ADna <- readRDS("naDAD.rds")
+
+ggarrange(lintDiff(ADst, "Seattle"), lintDiff(ADna, "North Alberta"), 
+          nrow = 2, padding=10, labels = c("A", "B"), 
+          label.args = list(gp = grid::gpar(font = 1, cex =1.5)))
+linGrowth(list(GDst,GDna))
+gaicPlot(list(GDst,GDna))
+
+# where do g1 and g2 come from?
+ggarrange(distPlot(g1, g2),
+          yearPlot(g1, g2),
+          nrow = 2, padding=10, labels = c("A", "B"), label.args = list(gp = grid::gpar(font = 1, cex =1.5)))
+
+par(mfrow=c(1,2))
+graphPlot(g1, 2011, 0.013, "dodgerblue")
+title("Seatte at d=0.013", line=-3)
+title("A", line=1, adj=0,cex.main=3)
+graphPlot(g2, 2012, 0.011, "orange2") 
+title("North Alberta data at d=0.011",line=-3)
+title("B", line=1, adj=0, cex.main=3)
